@@ -1,0 +1,231 @@
+`timescale 1ns/1ps
+// ================================================================
+// PCIe Gen4 TLP - SystemVerilog Testbench  (Vivado XSim fixed)
+//
+// ROOT CAUSE OF MISSING WAVEFORMS:
+//   XSim has a well-documented limitation where signals declared
+//   inside an 'interface' instance are NOT reliably written to the
+//   .wdb waveform database, even if $dumpvars reports no errors.
+//   Only signals declared as plain 'logic/wire' directly in the
+//   module scope are guaranteed to appear.
+//
+// FIX APPLIED:
+//   - interface_if REMOVED entirely
+//   - All DUT I/O declared as plain logic in tlp_top_sv scope
+//   - Driver/monitor converted to inline tasks (no virtual if)
+//   - Added decoded header fields as named logic signals so
+//     individual TLP fields are directly readable in waveform
+// ================================================================
+
+// ----------------------------------------------------------------
+// SCOREBOARD
+// ----------------------------------------------------------------
+class tlp_scoreboard;
+    int pkt_count = 0;
+
+    function void check(
+        input logic [159:0] pkt,
+        input logic [2:0]   fmt,
+        input logic [4:0]   typ,
+        input logic [9:0]   length,
+        input logic [7:0]   tag
+    );
+        pkt_count++;
+        $display("--------------------------------------------------");
+        $display("[SCB] Packet #%0d @ %0t ns", pkt_count, $time/1000);
+        $display("      Full Packet   : %h", pkt);
+        $display("      Header[127:0] : %h", pkt[159:32]);
+        $display("      Payload[31:0] : %h", pkt[31:0]);
+        $display("      FMT=%03b  TYPE=%05b  LEN=%0d  TAG=0x%02h",
+                  fmt, typ, length, tag);
+        if (pkt === 160'hx)
+            $error("[SCB] FAIL: X-state detected in TLP packet!");
+        if (length == 10'd0)
+            $warning("[SCB] WARN: data_length=0 (reserved in PCIe spec)");
+        $display("--------------------------------------------------");
+    endfunction
+endclass
+
+// ----------------------------------------------------------------
+// MONITOR STATE (simple counter class - no virtual interface)
+// ----------------------------------------------------------------
+class tlp_monitor;
+    int captured = 0;
+endclass
+
+// ================================================================
+// TESTBENCH TOP MODULE
+// ================================================================
+module tlp_top_sv;
+
+    // ── Clock ─────────────────────────────────────────────────────
+    // Init at declaration - avoids X-state before 'initial' runs
+    logic clk = 1'b0;
+    always #5 clk = ~clk;       // 100 MHz
+
+    // ── DUT I/O - plain logic, directly in module scope ───────────
+    // These are GUARANTEED to appear in XSim waveform window
+    logic        rst_n;
+    logic [31:0] payload_data;
+    logic        payload_valid;
+    logic [159:0] tlp_packet;
+    logic         tlp_valid;
+
+    // ── Decoded TLP header fields ──────────────────────────────────
+    // Assign combinationally so each field is a named waveform trace
+    // tlp_packet bit layout:
+    //   [159:128] DW0 | [127:96] DW1 | [95:64] DW2 | [63:32] DW3 | [31:0] payload
+    logic [2:0]  mon_fmt;       // DW0[31:29]
+    logic [4:0]  mon_type;      // DW0[28:24]
+    logic        mon_t9;        // DW0[23]
+    logic [2:0]  mon_tc;        // DW0[22:20]
+    logic        mon_t8;        // DW0[19]
+    logic [2:0]  mon_attr;      // DW0[18], DW0[13:12]
+    logic        mon_td;        // DW0[15]
+    logic        mon_ep;        // DW0[14]
+    logic [9:0]  mon_length;    // DW0[9:0]
+    logic [15:0] mon_req_id;    // DW1[31:16]
+    logic [7:0]  mon_tag;       // DW1[15:8]
+    logic [3:0]  mon_last_dw;   // DW1[7:4]
+    logic [3:0]  mon_first_dw;  // DW1[3:0]
+    logic [31:0] mon_dw2;       // DW2 (addr upper / cfg)
+    logic [31:0] mon_dw3;       // DW3 (addr lower)
+    logic [31:0] mon_payload;   // payload word
+
+    assign mon_fmt      = tlp_packet[159:157];
+    assign mon_type     = tlp_packet[156:152];
+    assign mon_t9       = tlp_packet[151];
+    assign mon_tc       = tlp_packet[150:148];
+    assign mon_t8       = tlp_packet[147];
+    assign mon_attr     = {tlp_packet[146], tlp_packet[141:140]};
+    assign mon_td       = tlp_packet[143];
+    assign mon_ep       = tlp_packet[142];
+    assign mon_length   = tlp_packet[137:128];
+    assign mon_req_id   = tlp_packet[127:112];
+    assign mon_tag      = tlp_packet[111:104];
+    assign mon_last_dw  = tlp_packet[103:100];
+    assign mon_first_dw = tlp_packet[99:96];
+    assign mon_dw2      = tlp_packet[95:64];
+    assign mon_dw3      = tlp_packet[63:32];
+    assign mon_payload  = tlp_packet[31:0];
+
+    // ── DUT Instantiation ──────────────────────────────────────────
+    tlp_top dut (
+        .clk          (clk),
+        .rst_n        (rst_n),
+        .payload_data (payload_data),
+        .payload_valid(payload_valid),
+        .tlp_packet   (tlp_packet),
+        .tlp_valid    (tlp_valid)
+    );
+
+    // ── Environment objects ────────────────────────────────────────
+    tlp_scoreboard scoreboard;
+    tlp_monitor    monitor_obj;
+    int            sent_count;
+
+    // ── Inline Driver Task ─────────────────────────────────────────
+    // Drives plain logic directly - no virtual interface required
+    task automatic send_payload(input logic [31:0] data);
+        @(posedge clk);
+        payload_data  <= data;
+        payload_valid <= 1'b1;
+        @(posedge clk);
+        payload_valid <= 1'b0;
+        sent_count++;
+        $display("[DRV] #%0d  data=0x%08h  time=%0t ns",
+                  sent_count, data, $time/1000);
+    endtask
+
+    // ── Inline Monitor Task ────────────────────────────────────────
+    task automatic run_monitor();
+        forever begin
+            @(posedge clk);
+            if (tlp_valid) begin
+                $display("[MON] tlp_valid @ %0t ns  packet=%h",
+                          $time/1000, tlp_packet);
+                scoreboard.check(
+                    tlp_packet,
+                    mon_fmt,
+                    mon_type,
+                    mon_length,
+                    mon_tag
+                );
+                monitor_obj.captured++;
+            end
+        end
+    endtask
+
+    // ── Stimulus ───────────────────────────────────────────────────
+    initial begin
+
+        // VCD dump - full hierarchy from this module downward
+        $dumpfile("tlp_sim.vcd");
+        $dumpvars(0, tlp_top_sv);
+
+        // Construct objects
+        scoreboard  = new();
+        monitor_obj = new();
+        sent_count  = 0;
+
+        // Initialise all driven signals
+        rst_n         = 1'b0;
+        payload_data  = 32'h0;
+        payload_valid = 1'b0;
+
+        // Reset - hold for 4 clock cycles
+        repeat(4) @(posedge clk);
+        rst_n = 1'b1;
+        $display("[TB]  Reset released @ %0t ns", $time/1000);
+
+        // Launch monitor FIRST, before any stimulus
+        fork
+            run_monitor();
+        join_none
+
+        // Wait for req_gen counter=10 → first req_valid pulse
+        // (req_gen takes 11 clocks: counter 0→10, then req_valid=1)
+        repeat(15) @(posedge clk);
+
+        $display("[TB]  --- Starting payload sequence ---");
+
+        // Each send_payload drives 1 cycle of payload_valid=1
+        // payload_inserter latches header_reg (from tlp_header's
+        // header_done) and combines with payload on the same cycle
+        send_payload(32'hDEAD_BEEF);
+        repeat(12) @(posedge clk);
+
+      /*  send_payload(32'hAABB_CCDD);
+        repeat(12) @(posedge clk);
+
+        send_payload(32'h1234_5678);
+        repeat(12) @(posedge clk);
+
+        send_payload(32'hCAFE_BABE);
+        repeat(12) @(posedge clk);
+
+        send_payload(32'hFEED_F00D);
+        repeat(12) @(posedge clk);
+
+        send_payload(32'hA5A5_A5A5);
+        repeat(12) @(posedge clk);
+                                           */
+        // Drain - give monitor time to catch final packet
+        repeat(30) @(posedge clk);
+
+        // Final report
+        $display("==================================================");
+        $display("[TB]  SIMULATION COMPLETE");
+        $display("      Payloads sent     : %0d", sent_count);
+        $display("      Packets captured  : %0d", monitor_obj.captured);
+        $display("      Packets in SCB    : %0d", scoreboard.pkt_count);
+        if (monitor_obj.captured == sent_count)
+            $display("      RESULT : PASS");
+        else
+            $error("      RESULT : FAIL - %0d packets missing",
+                    sent_count - monitor_obj.captured);
+        $display("==================================================");
+        $finish;
+    end
+
+endmodule
