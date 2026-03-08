@@ -1,53 +1,52 @@
-`timescale 1ns/1ps
+`timescale 1ns / 1ps
 
-module payload_inserter(
-
-    input clk,
-    input rst,
-
-    input [127:0] header_out,
-    input header_done,
-
-    input [31:0] payload_data,
-    input payload_valid,
-
-    output reg [159:0] tlp_packet,
-    output reg tlp_valid
-
+module payload_inserter (
+    input  logic         clk,
+    input  logic         rst_n,
+    input  logic [127:0] header_out,
+    input  logic         header_done,
+    input  logic [31:0]  payload_data,
+    input  logic         payload_valid,
+    output logic [159:0] tlp_packet,
+    output logic         tlp_valid
 );
 
-reg [127:0] header_reg;
-reg header_ready;
+    logic [127:0] header_reg;
+    logic         header_ready;
 
-always @(posedge clk or posedge rst)
-begin
-    if(!rst)
-    begin
-        header_reg   <= 0;
-        header_ready <= 0;
-        tlp_packet   <= 0;
-        tlp_valid    <= 0;
-    end
-
-    else
-    begin
-        tlp_valid <= 0;
-
-        // capture header
-        if(header_done)
-        begin
+    // ----------------------------------------------------------
+    // Latch header when header_done pulses
+    // ----------------------------------------------------------
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            header_reg   <= 128'h0;
+            header_ready <= 1'b0;
+        end
+        else if (header_done) begin
             header_reg   <= header_out;
-            header_ready <= 1;
+            header_ready <= 1'b1;
         end
-
-        // append payload
-        if(header_ready && payload_valid)
-        begin
-            tlp_packet <= {header_reg, payload_data};
-            tlp_valid  <= 1;
-            header_ready <= 0;
+        else if (header_ready && payload_valid) begin
+            header_ready <= 1'b0;   // consume header after payload fires
         end
     end
-end
+
+    // ----------------------------------------------------------
+    // Assemble TLP packet
+    // ----------------------------------------------------------
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            tlp_packet <= 160'h0;
+            tlp_valid  <= 1'b0;
+        end
+        else if (header_ready && payload_valid) begin
+            tlp_packet <= {header_reg, payload_data};
+            tlp_valid  <= 1'b1;
+        end
+        else begin
+            tlp_valid  <= 1'b0;
+            // tlp_packet holds last value - visible in waveform
+        end
+    end
 
 endmodule
