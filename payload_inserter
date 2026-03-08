@@ -1,0 +1,53 @@
+`timescale 1ns/1ps
+
+module payload_inserter(
+
+    input clk,
+    input rst,
+
+    input [127:0] header_out,
+    input header_done,
+
+    input [31:0] payload_data,
+    input payload_valid,
+
+    output reg [159:0] tlp_packet,
+    output reg tlp_valid
+
+);
+
+reg [127:0] header_reg;
+reg header_ready;
+
+always @(posedge clk or posedge rst)
+begin
+    if(!rst)
+    begin
+        header_reg   <= 0;
+        header_ready <= 0;
+        tlp_packet   <= 0;
+        tlp_valid    <= 0;
+    end
+
+    else
+    begin
+        tlp_valid <= 0;
+
+        // capture header
+        if(header_done)
+        begin
+            header_reg   <= header_out;
+            header_ready <= 1;
+        end
+
+        // append payload
+        if(header_ready && payload_valid)
+        begin
+            tlp_packet <= {header_reg, payload_data};
+            tlp_valid  <= 1;
+            header_ready <= 0;
+        end
+    end
+end
+
+endmodule
