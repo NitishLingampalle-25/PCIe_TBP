@@ -1,0 +1,220 @@
+module tlp_top(
+
+input clk,
+input rst_n,
+input rst,                 // for payload inserter
+
+//payload input
+input [31:0] payload_data,
+input payload_valid,
+
+//final outpu
+output [159:0] tlp_packet,
+output tlp_valid
+
+);
+
+//////////////////////////////////////////////////////
+// REQUEST GENERATOR ? TAG MANAGER WIRES
+//////////////////////////////////////////////////////
+
+wire req_valid;
+
+wire [2:0] req_fmt;
+wire [4:0] req_type;
+wire t9;
+wire [2:0] traffic_class;
+wire t8;
+wire [2:0] attr;
+wire R;
+wire th;
+wire td;
+wire ep;
+wire [1:0] at;
+wire [9:0] data_length;
+
+wire [15:0] request_id;
+wire [7:0] Tag;
+wire [3:0] last_DW;
+wire [3:0] first_DW;
+
+wire [7:0] Busnum;
+wire [63:0] Address;
+wire ph;
+
+//////////////////////////////////////////////////////
+// TAG MANAGER ? TLP HEADER WIRES
+//////////////////////////////////////////////////////
+
+wire req_valid_o;
+
+wire [2:0] req_fmt_o;
+wire [4:0] req_type_o;
+wire t9_o;
+wire [2:0] traffic_class_o;
+wire t8_o;
+wire [2:0] attr_o;
+wire R_o;
+wire th_o;
+wire td_o;
+wire ep_o;
+wire [1:0] at_o;
+wire [9:0] data_length_o;
+
+wire [15:0] request_id_o;
+wire [7:0] Tag_o;
+
+wire [3:0] last_DW_o;
+wire [3:0] first_DW_o;
+
+wire [7:0] Busnum_o;
+wire [63:0] Address_o;
+wire ph_o;
+
+//////////////////////////////////////////////////////
+// HEADER ? PAYLOAD INSERTER WIRES
+//////////////////////////////////////////////////////
+
+wire [127:0] header_out;
+wire header_done;
+
+//////////////////////////////////////////////////////
+// MODULE INSTANTIATIONS
+//////////////////////////////////////////////////////
+
+// Request Generator
+request_generator req_gen(
+
+.clk(clk),
+.rst_n(rst_n),
+
+.req_valid(req_valid),
+
+.req_fmt(req_fmt),
+.req_type(req_type),
+.t9(t9),
+.traffic_class(traffic_class),
+.t8(t8),
+.attr(attr),
+.R(R),
+.th(th),
+.td(td),
+.ep(ep),
+.at(at),
+.data_length(data_length),
+
+.request_id(request_id),
+.Tag(Tag),
+.last_DW(last_DW),
+.first_DW(first_DW),
+
+.Busnum(Busnum),
+.Address(Address),
+.ph(ph)
+
+);
+
+
+// Tag Manager
+tag_manager tag_mgr(
+
+.clk(clk),
+.rst_n(rst_n),
+
+.req_valid(req_valid),
+.req_fmt(req_fmt),
+.req_type(req_type),
+.t9(t9),
+.traffic_class(traffic_class),
+.t8(t8),
+.attr(attr),
+.R(R),
+.th(th),
+.td(td),
+.ep(ep),
+.at(at),
+.data_length(data_length),
+.request_id(request_id),
+.last_DW(last_DW),
+.first_DW(first_DW),
+.Busnum(Busnum),
+.Address(Address),
+.ph(ph),
+
+.req_valid_o(req_valid_o),
+.req_fmt_o(req_fmt_o),
+.req_type_o(req_type_o),
+.t9_o(t9_o),
+.traffic_class_o(traffic_class_o),
+.t8_o(t8_o),
+.attr_o(attr_o),
+.R_o(R_o),
+.th_o(th_o),
+.td_o(td_o),
+.ep_o(ep_o),
+.at_o(at_o),
+.data_length_o(data_length_o),
+.request_id_o(request_id_o),
+.Tag_o(Tag_o),
+.last_DW_o(last_DW_o),
+.first_DW_o(first_DW_o),
+.Busnum_o(Busnum_o),
+.Address_o(Address_o),
+.ph_o(ph_o)
+
+);
+
+
+// TLP Header Builder
+tlp_header header_unit(
+
+.clk(clk),
+.rst_n(rst_n),
+.req_valid(req_valid_o),
+
+.req_fmt(req_fmt_o),
+.req_type(req_type_o),
+.t9(t9_o),
+.traffic_class(traffic_class_o),
+.t8(t8_o),
+.attr(attr_o),
+.R(R_o),
+.th(th_o),
+.td(td_o),
+.ep(ep_o),
+.at(at_o),
+.data_length(data_length_o),
+
+.request_id(request_id_o),
+.Tag(Tag_o),
+.last_DW(last_DW_o),
+.first_DW(first_DW_o),
+
+.Busnum(Busnum_o),
+.Address(Address_o),
+.ph(ph_o),
+
+.header_out(header_out),
+.header_done(header_done)
+
+);
+
+
+// Payload Inserter
+payload_inserter payload_unit(
+
+.clk(clk),
+.rst(rst),
+
+.header_out(header_out),
+.header_done(header_done),
+
+.payload_data(payload_data),
+.payload_valid(payload_valid),
+
+.tlp_packet(tlp_packet),
+.tlp_valid(tlp_valid)
+
+);
+
+endmodule
