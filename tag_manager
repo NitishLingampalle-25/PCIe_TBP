@@ -1,0 +1,89 @@
+
+`timescale 1ns/1ps
+
+module tag_manager(
+
+input  wire clk,
+input  wire rst_n,
+
+//inputs from request generator
+input  wire req_valid,
+input  wire [2:0] req_fmt,
+input  wire [4:0] req_type,
+input  wire t9,
+input  wire [2:0] traffic_class,
+input  wire t8,
+input  wire [2:0] attr,
+input  wire R,
+input  wire th,
+input  wire td,
+input  wire ep,
+input  wire [1:0] at,
+input  wire [9:0] data_length,
+input  wire [15:0] request_id,
+input  wire [3:0] last_DW,
+input  wire [3:0] first_DW,
+input  wire [7:0] Busnum,
+input  wire [63:0] Address,
+input  wire ph,
+
+//outputs to TLP header
+output wire req_valid_o,
+output wire [2:0] req_fmt_o,
+output wire [4:0] req_type_o,
+output wire t9_o,
+output wire [2:0] traffic_class_o,
+output wire t8_o,
+output wire [2:0] attr_o,
+output wire R_o,
+output wire th_o,
+output wire td_o,
+output wire ep_o,
+output wire [1:0] at_o,
+output wire [9:0] data_length_o,
+output wire [15:0] request_id_o,
+output wire [7:0] Tag_o,
+output wire [3:0] last_DW_o,
+output wire [3:0] first_DW_o,
+output wire [7:0] Busnum_o,
+output wire [63:0] Address_o,
+output wire ph_o
+
+);
+
+reg [7:0] tag_counter;
+
+//tag generation
+always @(posedge clk or negedge rst_n) begin
+    if(!rst_n)
+        tag_counter <= 8'd0;
+
+    else if(req_valid)
+        tag_counter <= tag_counter + 1'b1;
+end
+
+//pass-through connections
+assign req_valid_o    = req_valid;
+assign req_fmt_o      = req_fmt;
+assign req_type_o     = req_type;
+assign t9_o           = t9;
+assign traffic_class_o= traffic_class;
+assign t8_o           = t8;
+assign attr_o         = attr;
+assign R_o            = R;
+assign th_o           = th;
+assign td_o           = td;
+assign ep_o           = ep;
+assign at_o           = at;
+assign data_length_o  = data_length;
+assign request_id_o   = request_id;
+assign last_DW_o      = last_DW;
+assign first_DW_o     = first_DW;
+assign Busnum_o       = Busnum;
+assign Address_o      = Address;
+assign ph_o           = ph;
+
+//tag injection
+assign Tag_o = tag_counter;
+
+endmodule
